@@ -1,0 +1,699 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      Stata 18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-782-8272        https://www.stata.com
+                                   979-696-4600        service@stata.com
+
+Stata license: Single-user 16-core  perpetual
+Serial number: 501806307019
+  Licensed to: Keep calm and DO your research
+               Jichun Si
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+. do 02_descriptive_stats.do 
+
+. /*===========================================================================
+>   02_descriptive_stats.do
+>   Shanghai Car License Plate Auction Data - Descriptive Statistics
+>   Data: 2010m1 - 2026m2 (194 observations)
+>   Author: Sisyphus
+>   Date: 2026-03-26
+> ===========================================================================*/
+. 
+. clear all
+
+. set more off
+
+. capture log close
+
+. 
+. * Set working directory
+. cd "/home/aragorn/Working/chepai_data"
+/home/aragorn/Working/chepai_data
+
+. 
+. * Load data
+. use "data/cleaned_data.dta", clear
+
+. 
+. * Create output directories
+. capture mkdir "results"
+
+. capture mkdir "results/figures"
+
+. 
+. * Open log
+. log using "log/02_descriptive_stats.log", replace text
+(file /home/aragorn/Working/chepai_data/log/02_descriptive_stats.log not
+    found)
+-------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  /home/aragorn/Working/chepai_data/log/02_descriptive_stats.log
+  log type:  text
+ opened on:  26 Mar 2026, 15:44:28
+
+. 
+. * Set graph scheme
+. set scheme s2color
+
+. 
+. *---------------------------------------------------------------------------
+. * 1. DESCRIPTIVE STATISTICS TABLE (Full Sample)
+. *---------------------------------------------------------------------------
+. di _n "=== Descriptive Statistics - Full Sample ==="
+
+=== Descriptive Statistics - Full Sample ===
+
+. sum min_price avg_price supply bidders warning_price bid_ratio price_spread i
+> f !anomaly
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+   min_price |        193    81035.75    16167.67      37800      94500
+   avg_price |        193    81236.35    15985.81      38311      94599
+      supply |        193    9818.767    3224.568       3784      18933
+     bidders |        193    119793.8    82644.66      13389     277889
+warning_pr~e |        154    86635.71    6140.923      72600      92900
+-------------+---------------------------------------------------------
+   bid_ratio |        193    12.01877    7.379976   1.487667   26.60758
+price_spread |        193     200.601    317.6716          0       2427
+
+. 
+. * Check if estout package is available
+. capture which estpost
+
+. if _rc == 0 {
+.     * estout is available
+.     estpost summarize min_price avg_price supply bidders warning_price bid_ra
+> tio price_spread if !anomaly
+
+             |  e(count)   e(sum_w)    e(mean)     e(Var)      e(sd) 
+-------------+-------------------------------------------------------
+   min_price |       193        193   81035.75   2.61e+08   16167.67 
+   avg_price |       193        193   81236.35   2.56e+08   15985.81 
+      supply |       193        193   9818.767   1.04e+07   3224.568 
+     bidders |       193        193   119793.8   6.83e+09   82644.66 
+warning_pr~e |       154        154   86635.71   3.77e+07   6140.923 
+   bid_ratio |       193        193   12.01877   54.46405   7.379976 
+price_spread |       193        193    200.601   100915.2   317.6716 
+
+             |    e(min)     e(max)     e(sum) 
+-------------+---------------------------------
+   min_price |     37800      94500   1.56e+07 
+   avg_price |     38311      94599   1.57e+07 
+      supply |      3784      18933    1895022 
+     bidders |     13389     277889   2.31e+07 
+warning_pr~e |     72600      92900   1.33e+07 
+   bid_ratio |  1.487667   26.60758   2319.623 
+price_spread |         0       2427      38716 
+.     esttab using "results/desc_stats.txt", replace ///
+>         cells("mean(fmt(%10.1f)) sd(fmt(%10.1f)) min(fmt(%10.0f)) max(fmt(%10
+> .0f)) count(fmt(%3.0f))") ///
+>         title("Descriptive Statistics - Full Sample") label noobs
+(file results/desc_stats.txt not found)
+(output written to results/desc_stats.txt)
+.     di "Descriptive stats written via esttab."
+Descriptive stats written via esttab.
+. }
+
+. else {
+.     * Fallback: use file write
+.     file open fh using "results/desc_stats.txt", write replace
+.     file write fh "Descriptive Statistics - Full Sample" _n
+.     file write fh "==========================================================
+> ===========" _n
+.     file write fh "Variable            Mean          SD           Min        
+>   Max         N" _n
+.     file write fh "----------------------------------------------------------
+> -----------" _n
+.     foreach v in min_price avg_price supply bidders warning_price bid_ratio p
+> rice_spread {
+  2.         quietly sum `v' if !anomaly
+  3.         file write fh %-20s ("`v'") %12.1f (r(mean)) %12.1f (r(sd)) %12.0f
+>  (r(min)) %12.0f (r(max)) %8.0f (r(N)) _n
+  4.     }
+.     file write fh "==========================================================
+> ===========" _n
+.     file close fh
+.     di "Descriptive stats written via file write (estout not available)."
+. }
+
+. 
+. *---------------------------------------------------------------------------
+. * 2. TRAIN vs TEST SPLIT SUMMARY
+. *---------------------------------------------------------------------------
+. di _n "=== Train/Test Split Summary ==="
+
+=== Train/Test Split Summary ===
+
+. tab train
+
+  Train set |
+  indicator |
+     (up to |
+     2025m9 |
+ inclusive) |      Freq.     Percent        Cum.
+------------+-----------------------------------
+          0 |          5        2.58        2.58
+          1 |        189       97.42      100.00
+------------+-----------------------------------
+      Total |        194      100.00
+
+. di "Training observations: " %3.0f sum(train)
+Training observations:   1
+
+. di "Test observations:      " %3.0f sum(test)
+Test observations:        0
+
+. 
+. *---------------------------------------------------------------------------
+. * 3. MISSING VALUES CHECK
+. *---------------------------------------------------------------------------
+. di _n "=== Missing Value Check ==="
+
+=== Missing Value Check ===
+
+. misstable summarize min_price avg_price supply bidders year month
+(variables nonmissing or string)
+
+. 
+. * Check lagged variables (expect 1 missing at start)
+. misstable summarize L1_min L2_min L1_avg L1_warning L1_bidders
+                                                               Obs<.
+                                                +------------------------------
+               |                                | Unique
+      Variable |     Obs=.     Obs>.     Obs<.  | values        Min         Max
+  -------------+--------------------------------+------------------------------
+        L1_min |         1                 193  |    123      10400       94500
+        L2_min |         2                 192  |    123      10400       94500
+        L1_avg |         1                 193  |    193      15970       94599
+    L1_warning |        41                 153  |     25      72600       92900
+    L1_bidders |         1                 193  |    193      11224      277889
+  -----------------------------------------------------------------------------
+
+. 
+. *---------------------------------------------------------------------------
+. * 4. DUPLICATE MONTHS CHECK
+. *---------------------------------------------------------------------------
+. di _n "=== Duplicate Year-Month Check ==="
+
+=== Duplicate Year-Month Check ===
+
+. duplicates report year month
+
+Duplicates in terms of year month
+
+--------------------------------------
+   Copies | Observations       Surplus
+----------+---------------------------
+        1 |          194             0
+--------------------------------------
+
+. 
+. *---------------------------------------------------------------------------
+. * 5. RANGE ASSERTIONS
+. *---------------------------------------------------------------------------
+. di _n "=== Assertion Checks ==="
+
+=== Assertion Checks ===
+
+. assert min_price > 0 if !missing(min_price)
+
+. assert supply > 0 if !missing(supply)
+
+. assert bidders > 0 if !missing(bidders)
+
+. di "All assertions passed."
+All assertions passed.
+
+. 
+. * Show anomaly observation
+. di _n "=== Anomaly Observation ==="
+
+=== Anomaly Observation ===
+
+. list year month min_price avg_price if anomaly == 1
+
+     +------------------------------------+
+     | year   month   min_pr~e   avg_pr~e |
+     |------------------------------------|
+ 12. | 2010      12      10400      15970 |
+     +------------------------------------+
+
+. 
+. * Show potential anomalies: unusually low prices
+. di _n "=== Low Price Observations (< 20000 yuan) ==="
+
+=== Low Price Observations (< 20000 yuan) ===
+
+. list year month min_price avg_price if (min_price < 20000 | avg_price < 20000
+> ) & !missing(min_price)
+
+     +------------------------------------+
+     | year   month   min_pr~e   avg_pr~e |
+     |------------------------------------|
+ 12. | 2010      12      10400      15970 |
+     +------------------------------------+
+
+. 
+. *---------------------------------------------------------------------------
+. * 6. CORRELATION MATRIX (Training sample, no anomaly)
+. *---------------------------------------------------------------------------
+. di _n "=== Correlation Matrix (Train sample, no anomaly) ==="
+
+=== Correlation Matrix (Train sample, no anomaly) ===
+
+. pwcorr min_price avg_price supply bidders warning_price bid_ratio L1_min if t
+> rain & !anomaly, star(0.05) sig
+
+             | min_pr~e avg_pr~e   supply  bidders warnin~e bid_ra~o   L1_min
+-------------+---------------------------------------------------------------
+   min_price |   1.0000 
+             |
+             |
+   avg_price |   0.9999*  1.0000 
+             |   0.0000
+             |
+      supply |   0.2665*  0.2674*  1.0000 
+             |   0.0002   0.0002
+             |
+     bidders |   0.5835*  0.5808*  0.4491*  1.0000 
+             |   0.0000   0.0000   0.0000
+             |
+warning_pr~e |   0.9698*  0.9705*  0.2656*  0.0666   1.0000 
+             |   0.0000   0.0000   0.0011   0.4196
+             |
+   bid_ratio |   0.5722*  0.5688*  0.0710   0.9104* -0.1213   1.0000 
+             |   0.0000   0.0000   0.3328   0.0000   0.1407
+             |
+      L1_min |   0.9855*  0.9858*  0.2636*  0.5719*  0.9666*  0.5593*  1.0000 
+             |   0.0000   0.0000   0.0003   0.0000   0.0000   0.0000
+             |
+
+. 
+. *---------------------------------------------------------------------------
+. * 7. ANNUAL MEANS TABLE
+. *---------------------------------------------------------------------------
+. di _n "=== Annual Mean Values ==="
+
+=== Annual Mean Values ===
+
+. preserve
+
+. collapse (mean) min_price avg_price supply bidders bid_ratio ///
+>          (count) n_obs=min_price, by(year)
+
+. label var min_price "Mean Min Price"
+
+. label var avg_price "Mean Avg Price"
+
+. label var supply    "Mean Supply"
+
+. label var bidders   "Mean Bidders"
+
+. label var bid_ratio "Mean Bid Ratio"
+
+. label var n_obs     "Observations"
+
+. list year min_price avg_price supply bidders bid_ratio n_obs, sep(0) noobs
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2010 | 38008.33333 | 38944.58333 |    8600 | 15867.83333 | 1.862742 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2011 | 47958.33333 |    48592.75 |    8625 | 23580.08333 | 2.760392 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2012 | 61108.33333 |    61827.25 | 9008.33 | 22391.83333 | 2.507957 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2013 |       79125 | 79496.41667 | 9166.67 | 27110.33333 | 2.983847 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2014 | 73816.66667 |    73914.75 | 7603.92 | 97630.16667 | 12.89277 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2015 |       80575 |     80685.5 | 7745.58 | 152743.3333 | 19.77892 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2016 | 85733.33333 |       85796 | 11033.3 | 232111.3333 | 21.25317 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2017 | 90616.66667 |       90687 | 11115.4 | 249034.3333 | 22.58984 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2018 |       87825 | 87907.16667 | 11241.3 |    198864.5 | 17.86486 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2019 | 89583.33333 | 89660.33333 | 9343.25 |    157975.5 | 17.04678 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2020 | 90641.66667 | 90742.08333 | 14477.2 | 147168.6667 | 10.79459 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2021 |       91800 |     91870.5 | 11233.9 | 229716.1667 |  20.5102 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2022 | 92116.66667 | 92217.58333 | 15016.9 | 175928.6667 | 12.55106 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2023 |       92300 | 92392.16667 | 12970.8 | 102674.8333 | 8.028046 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2024 | 93391.66667 | 93480.08333 | 6801.92 | 44564.83333 | 7.460366 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2025 | 93908.33333 |    93979.75 | 4053.67 |     43394.5 | 10.70893 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                   12                                |
+  +---------------------------------------------------------------------+
+
+  +---------------------------------------------------------------------+
+  | year |   min_price |   avg_price |  supply |     bidders | bid_ra~o |
+  | 2026 |       94100 |     94129.5 |  3788.5 |       41172 | 10.86808 |
+  |---------------------------------------------------------------------|
+  |                                n_obs                                |
+  |                                    2                                |
+  +---------------------------------------------------------------------+
+
+. restore
+
+. 
+. *---------------------------------------------------------------------------
+. * 8. DEFINE TIME AXIS LABELS
+. *---------------------------------------------------------------------------
+. * t is numeric 1-194; map January of each year to a label
+. label define tlab ///
+>     1   "2010" ///
+>     13  "2011" ///
+>     25  "2012" ///
+>     37  "2013" ///
+>     49  "2014" ///
+>     61  "2015" ///
+>     73  "2016" ///
+>     85  "2017" ///
+>     97  "2018" ///
+>     109 "2019" ///
+>     121 "2020" ///
+>     133 "2021" ///
+>     145 "2022" ///
+>     157 "2023" ///
+>     169 "2024" ///
+>     181 "2025" ///
+>     194 "2026m2"
+
+. label values t tlab
+
+. 
+. * Train/test boundary: last train obs is 2025m9 = t=189 (1+(2025-2010)*12+9-1
+> =188... let's calc)
+. * t = (year-2010)*12 + month  → 2025m9: (2025-2010)*12 + 9 = 180+9 = 189
+. * first test obs: 2025m10 → t = 190
+. local split_t = 189
+
+. 
+. *---------------------------------------------------------------------------
+. * 9. FIGURE: Price Trend Over Time
+. *---------------------------------------------------------------------------
+. twoway ///
+>     (line min_price t if !anomaly, lcolor(navy) lwidth(medthin) lpattern(soli
+> d)) ///
+>     (line avg_price t if !anomaly, lcolor(cranberry) lwidth(medthin) lpattern
+> (dash)), ///
+>     title("Shanghai Car License Plate Auction Prices", size(medium)) ///
+>     subtitle("Monthly 2010m1 – 2026m2 (anomaly 2010m12 excluded)", size(small
+> )) ///
+>     ytitle("Price (Yuan)", size(small)) xtitle("") ///
+>     xlabel(1 13 25 37 49 61 73 85 97 109 121 133 145 157 169 181 194, ///
+>            angle(45) valuelabel labsize(vsmall)) ///
+>     xline(`split_t', lcolor(green) lpattern(shortdash) lwidth(thin)) ///
+>     legend(label(1 "Minimum Price") label(2 "Average Price") ///
+>            ring(0) position(11) size(small)) ///
+>     note("Green dashed line = train/test split (2025m9/2025m10)", size(vsmall
+> ))
+
+. graph export "results/figures/price_trend.png", replace width(1200)
+(file results/figures/price_trend.png not found)
+file results/figures/price_trend.png written in PNG format
+
+. di "Saved: results/figures/price_trend.png"
+Saved: results/figures/price_trend.png
+
+. 
+. *---------------------------------------------------------------------------
+. * 10. FIGURE: Plates Supply Over Time
+. *---------------------------------------------------------------------------
+. twoway (line supply t if !anomaly, lcolor(dknavy) lwidth(medthin)), ///
+>     title("Plates Supplied Over Time", size(medium)) ///
+>     subtitle("Monthly 2010m1 – 2026m2", size(small)) ///
+>     ytitle("Quantity", size(small)) xtitle("") ///
+>     xlabel(1 13 25 37 49 61 73 85 97 109 121 133 145 157 169 181 194, ///
+>            angle(45) valuelabel labsize(vsmall)) ///
+>     xline(`split_t', lcolor(green) lpattern(shortdash) lwidth(thin))
+
+. graph export "results/figures/supply_trend.png", replace width(1200)
+(file results/figures/supply_trend.png not found)
+file results/figures/supply_trend.png written in PNG format
+
+. di "Saved: results/figures/supply_trend.png"
+Saved: results/figures/supply_trend.png
+
+. 
+. *---------------------------------------------------------------------------
+. * 11. FIGURE: Number of Bidders Over Time
+. *---------------------------------------------------------------------------
+. twoway (line bidders t if !anomaly, lcolor(dkgreen) lwidth(medthin)), ///
+>     title("Number of Bidders Over Time", size(medium)) ///
+>     subtitle("Monthly 2010m1 – 2026m2", size(small)) ///
+>     ytitle("Bidders", size(small)) xtitle("") ///
+>     xlabel(1 13 25 37 49 61 73 85 97 109 121 133 145 157 169 181 194, ///
+>            angle(45) valuelabel labsize(vsmall)) ///
+>     xline(`split_t', lcolor(green) lpattern(shortdash) lwidth(thin))
+
+. graph export "results/figures/bidders_trend.png", replace width(1200)
+(file results/figures/bidders_trend.png not found)
+file results/figures/bidders_trend.png written in PNG format
+
+. di "Saved: results/figures/bidders_trend.png"
+Saved: results/figures/bidders_trend.png
+
+. 
+. *---------------------------------------------------------------------------
+. * 12. FIGURE: Bid-to-Supply Ratio Over Time
+. *---------------------------------------------------------------------------
+. twoway (line bid_ratio t if !anomaly, lcolor(orange) lwidth(medthin)), ///
+>     title("Bid-to-Supply Ratio Over Time", size(medium)) ///
+>     subtitle("Monthly 2010m1 – 2026m2", size(small)) ///
+>     ytitle("Ratio (Bidders/Supply)", size(small)) xtitle("") ///
+>     xlabel(1 13 25 37 49 61 73 85 97 109 121 133 145 157 169 181 194, ///
+>            angle(45) valuelabel labsize(vsmall)) ///
+>     xline(`split_t', lcolor(green) lpattern(shortdash) lwidth(thin))
+
+. graph export "results/figures/bidratio_trend.png", replace width(1200)
+(file results/figures/bidratio_trend.png not found)
+file results/figures/bidratio_trend.png written in PNG format
+
+. di "Saved: results/figures/bidratio_trend.png"
+Saved: results/figures/bidratio_trend.png
+
+. 
+. *---------------------------------------------------------------------------
+. * 13. FIGURE: Warning Price vs Transaction Prices (2014 onward, t >= 49)
+. *---------------------------------------------------------------------------
+. twoway ///
+>     (line min_price t if t >= 49 & !anomaly, lcolor(navy) lwidth(medthin) lpa
+> ttern(solid)) ///
+>     (line avg_price t if t >= 49 & !anomaly, lcolor(cranberry) lwidth(medthin
+> ) lpattern(dash)) ///
+>     (line warning_price t if t >= 49 & !missing(warning_price), lcolor(dkgree
+> n) lwidth(medthin) lpattern(dot)), ///
+>     title("Prices vs Warning Price (2014 onward)", size(medium)) ///
+>     ytitle("Price (Yuan)", size(small)) xtitle("") ///
+>     xlabel(49 61 73 85 97 109 121 133 145 157 169 181 194, ///
+>            angle(45) valuelabel labsize(vsmall)) ///
+>     xline(`split_t', lcolor(green) lpattern(shortdash) lwidth(thin)) ///
+>     legend(label(1 "Min Price") label(2 "Avg Price") label(3 "Warning Price")
+>  ///
+>            ring(0) position(11) size(small))
+
+. graph export "results/figures/warning_price_comparison.png", replace width(12
+> 00)
+(file results/figures/warning_price_comparison.png not found)
+file results/figures/warning_price_comparison.png written in PNG format
+
+. di "Saved: results/figures/warning_price_comparison.png"
+Saved: results/figures/warning_price_comparison.png
+
+. 
+. *---------------------------------------------------------------------------
+. * 14. FIGURE: Log Prices Trend (for regression context)
+. *---------------------------------------------------------------------------
+. twoway ///
+>     (line ln_min_price t if !anomaly, lcolor(navy) lwidth(medthin) lpattern(s
+> olid)) ///
+>     (line ln_avg_price t if !anomaly, lcolor(cranberry) lwidth(medthin) lpatt
+> ern(dash)), ///
+>     title("Log Prices Over Time", size(medium)) ///
+>     ytitle("Log Price", size(small)) xtitle("") ///
+>     xlabel(1 13 25 37 49 61 73 85 97 109 121 133 145 157 169 181 194, ///
+>            angle(45) valuelabel labsize(vsmall)) ///
+>     xline(`split_t', lcolor(green) lpattern(shortdash) lwidth(thin)) ///
+>     legend(label(1 "Log Min Price") label(2 "Log Avg Price") ///
+>            ring(0) position(11) size(small))
+
+. graph export "results/figures/log_prices_trend.png", replace width(1200)
+(file results/figures/log_prices_trend.png not found)
+file results/figures/log_prices_trend.png written in PNG format
+
+. di "Saved: results/figures/log_prices_trend.png"
+Saved: results/figures/log_prices_trend.png
+
+. 
+. *---------------------------------------------------------------------------
+. * 15. FIGURE: Price Spread Over Time
+. *---------------------------------------------------------------------------
+. twoway (line price_spread t if !anomaly, lcolor(purple) lwidth(medthin)), ///
+>     title("Price Spread (Avg - Min) Over Time", size(medium)) ///
+>     ytitle("Spread (Yuan)", size(small)) xtitle("") ///
+>     xlabel(1 13 25 37 49 61 73 85 97 109 121 133 145 157 169 181 194, ///
+>            angle(45) valuelabel labsize(vsmall)) ///
+>     xline(`split_t', lcolor(green) lpattern(shortdash) lwidth(thin))
+
+. graph export "results/figures/price_spread_trend.png", replace width(1200)
+(file results/figures/price_spread_trend.png not found)
+file results/figures/price_spread_trend.png written in PNG format
+
+. di "Saved: results/figures/price_spread_trend.png"
+Saved: results/figures/price_spread_trend.png
+
+. 
+. *---------------------------------------------------------------------------
+. * 16. FINAL SUMMARY
+. *---------------------------------------------------------------------------
+. di _n "=== File list in results/figures/ ==="
+
+=== File list in results/figures/ ===
+
+. local figures : dir "results/figures" files "*.png"
+
+. foreach f of local figures {
+  2.     di "  " "`f'"
+  3. }
+  price_trend.png
+  supply_trend.png
+  warning_price_comparison.png
+  bidders_trend.png
+  log_prices_trend.png
+  price_spread_trend.png
+  bidratio_trend.png
+
+. 
+. di _n "=== 02_descriptive_stats.do completed successfully ==="
+
+=== 02_descriptive_stats.do completed successfully ===
+
+. di "Output: results/desc_stats.txt"
+Output: results/desc_stats.txt
+
+. di "Figures: results/figures/*.png"
+Figures: results/figures/*.png
+
+. 
+. log close
+      name:  <unnamed>
+       log:  /home/aragorn/Working/chepai_data/log/02_descriptive_stats.log
+  log type:  text
+ closed on:  26 Mar 2026, 15:44:31
+-------------------------------------------------------------------------------
+
+. 
+end of do-file

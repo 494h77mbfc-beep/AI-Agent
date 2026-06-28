@@ -1,0 +1,850 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      Stata 18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-782-8272        https://www.stata.com
+                                   979-696-4600        service@stata.com
+
+Stata license: Single-user 16-core  perpetual
+Serial number: 501806307019
+  Licensed to: Keep calm and DO your research
+               Jichun Si
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+. do 04_prediction.do 
+
+. /*===========================================================================
+>   04_prediction.do
+>   Out-of-Sample Prediction and Evaluation
+>   Models: MA4, MB4, MC4, MD4 (with warning_price)
+>           FA4, FB4, FC4, FD4 (full sample, no warning_price)
+> ===========================================================================*/
+. 
+. clear all
+
+. set more off
+
+. capture log close
+
+. cd "/home/aragorn/Working/chepai_data"
+/home/aragorn/Working/chepai_data
+
+. use "data/cleaned_data.dta", clear
+
+. capture mkdir "results"
+
+. capture mkdir "log"
+
+. log using "log/04_prediction.log", replace text
+-------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  /home/aragorn/Working/chepai_data/log/04_prediction.log
+  log type:  text
+ opened on:  26 Mar 2026, 15:53:48
+
+. 
+. * ── display test set ───────────────────────────────────────────────────────
+> ─
+. di "=== Test set observations ==="
+=== Test set observations ===
+
+. list year month min_price avg_price warning_price supply bidders if test==1
+
+     +------------------------------------------------------------------+
+     | year   month   min_pr~e   avg_pr~e   warnin~e   supply   bidders |
+     |------------------------------------------------------------------|
+190. | 2025      10      93600      93600      92400     3980     43279 |
+191. | 2025      11      93600      93714      92400     3821     40659 |
+192. | 2025      12      93900      93900      92400     3818     42382 |
+193. | 2026       1      94100      94159      92900     3784     42564 |
+194. | 2026       2      94100      94100      92900     3793     39780 |
+     +------------------------------------------------------------------+
+
+. 
+. * ── open detail file ───────────────────────────────────────────────────────
+> ─
+. file open fout using "results/prediction_detail.txt", write replace
+
+. file write fout "Model" _tab "DepVar" _tab "Type" _tab "Year" _tab "Month" //
+> /
+>     _tab "Actual" _tab "Predicted" _tab "Error" _tab "AbsError" _tab "PctErro
+> r" _n
+
+. 
+. * Collect test period t values
+. qui levelsof t if test==1, local(test_ts)
+
+. di "Test t values: `test_ts'"
+Test t values: 190 191 192 193 194
+
+. 
+. *===========================================================================
+. * SECTION 1 – Models with warning_price (train & !anomaly, 2014+)
+. *===========================================================================
+. 
+. *---------------------------------------------------------------------------
+. * MA4: Level min_price  supply bidders warning_price t i.month L1_min
+. *---------------------------------------------------------------------------
+. capture drop p0 e0
+
+. 
+. qui reg min_price supply bidders warning_price t i.month L1_min ///
+>     if train==1 & anomaly==0
+
+. qui predict p0
+
+. qui gen e0 = min_price - p0
+
+. 
+. scalar mae_MA4  = 0
+
+. scalar sse_MA4  = 0
+
+. scalar mape_MA4 = 0
+
+. scalar cnt_MA4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum min_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     qui sum year if t==`tv'
+ 10.     local yr = r(mean)
+ 11.     qui sum month if t==`tv'
+ 12.     local mo = r(mean)
+ 13.     scalar mae_MA4  = mae_MA4  + `ae'
+ 14.     scalar sse_MA4  = sse_MA4  + (`e')^2
+ 15.     scalar mape_MA4 = mape_MA4 + `pe'
+ 16.     scalar cnt_MA4  = cnt_MA4  + 1
+ 17.     file write fout "MA4" _tab "min_price" _tab "level" _tab "`yr'" _tab "
+> `mo'" ///
+>         _tab "`a'" _tab %8.1f (`p') _tab %8.1f (`e') _tab %8.1f (`ae') _tab %
+> 6.2f (`pe') _n
+ 18. }
+
+. scalar mae_MA4  = mae_MA4  / cnt_MA4
+
+. scalar rmse_MA4 = sqrt(sse_MA4 / cnt_MA4)
+
+. scalar mape_MA4 = mape_MA4 / cnt_MA4
+
+. di "MA4: MAE=" mae_MA4 "  RMSE=" rmse_MA4 "  MAPE=" mape_MA4
+MA4: MAE=638.26563  RMSE=686.71331  MAPE=.68030569
+
+. 
+. * Save per-period predictions for the detailed table
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_MA4_`tv' = r(mean)
+  4.     qui sum min_price if t==`tv'
+  5.     scalar act_min_`tv' = r(mean)
+  6.     qui sum year if t==`tv'
+  7.     scalar yr_`tv' = r(mean)
+  8.     qui sum month if t==`tv'
+  9.     scalar mo_`tv' = r(mean)
+ 10. }
+
+. 
+. drop p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * MB4: Log min_price  ln_supply ln_bidders ln_warning t i.month L1_ln_min
+. *---------------------------------------------------------------------------
+. capture drop plog p0 e0
+
+. 
+. qui reg ln_min_price ln_supply ln_bidders ln_warning t i.month L1_ln_min ///
+>     if train==1 & anomaly==0
+
+. local sigma2_MB4 = e(rmse)^2
+
+. qui predict plog
+
+. qui gen p0 = exp(plog + `sigma2_MB4'/2)
+
+. qui gen e0 = min_price - p0
+
+. 
+. scalar mae_MB4  = 0
+
+. scalar sse_MB4  = 0
+
+. scalar mape_MB4 = 0
+
+. scalar cnt_MB4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum min_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     qui sum year if t==`tv'
+ 10.     local yr = r(mean)
+ 11.     qui sum month if t==`tv'
+ 12.     local mo = r(mean)
+ 13.     scalar mae_MB4  = mae_MB4  + `ae'
+ 14.     scalar sse_MB4  = sse_MB4  + (`e')^2
+ 15.     scalar mape_MB4 = mape_MB4 + `pe'
+ 16.     scalar cnt_MB4  = cnt_MB4  + 1
+ 17.     file write fout "MB4" _tab "min_price" _tab "log->level" _tab "`yr'" _
+> tab "`mo'" ///
+>         _tab "`a'" _tab %8.1f (`p') _tab %8.1f (`e') _tab %8.1f (`ae') _tab %
+> 6.2f (`pe') _n
+ 18. }
+
+. scalar mae_MB4  = mae_MB4  / cnt_MB4
+
+. scalar rmse_MB4 = sqrt(sse_MB4 / cnt_MB4)
+
+. scalar mape_MB4 = mape_MB4 / cnt_MB4
+
+. di "MB4: MAE=" mae_MB4 "  RMSE=" rmse_MB4 "  MAPE=" mape_MB4
+MB4: MAE=640.74531  RMSE=683.77109  MAPE=.68279012
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_MB4_`tv' = r(mean)
+  4. }
+
+. 
+. drop plog p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * MC4: Level avg_price  supply bidders warning_price t i.month L1_avg
+. *---------------------------------------------------------------------------
+. capture drop p0 e0
+
+. 
+. qui reg avg_price supply bidders warning_price t i.month L1_avg ///
+>     if train==1 & anomaly==0
+
+. qui predict p0
+
+. qui gen e0 = avg_price - p0
+
+. 
+. scalar mae_MC4  = 0
+
+. scalar sse_MC4  = 0
+
+. scalar mape_MC4 = 0
+
+. scalar cnt_MC4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum avg_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     qui sum year if t==`tv'
+ 10.     local yr = r(mean)
+ 11.     qui sum month if t==`tv'
+ 12.     local mo = r(mean)
+ 13.     scalar mae_MC4  = mae_MC4  + `ae'
+ 14.     scalar sse_MC4  = sse_MC4  + (`e')^2
+ 15.     scalar mape_MC4 = mape_MC4 + `pe'
+ 16.     scalar cnt_MC4  = cnt_MC4  + 1
+ 17.     file write fout "MC4" _tab "avg_price" _tab "level" _tab "`yr'" _tab "
+> `mo'" ///
+>         _tab "`a'" _tab %8.1f (`p') _tab %8.1f (`e') _tab %8.1f (`ae') _tab %
+> 6.2f (`pe') _n
+ 18. }
+
+. scalar mae_MC4  = mae_MC4  / cnt_MC4
+
+. scalar rmse_MC4 = sqrt(sse_MC4 / cnt_MC4)
+
+. scalar mape_MC4 = mape_MC4 / cnt_MC4
+
+. di "MC4: MAE=" mae_MC4 "  RMSE=" rmse_MC4 "  MAPE=" mape_MC4
+MC4: MAE=683.17188  RMSE=734.40657  MAPE=.72789765
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_MC4_`tv' = r(mean)
+  4.     qui sum avg_price if t==`tv'
+  5.     scalar act_avg_`tv' = r(mean)
+  6. }
+
+. 
+. drop p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * MD4: Log avg_price  ln_supply ln_bidders ln_warning t i.month L1_ln_avg
+. *---------------------------------------------------------------------------
+. capture drop plog p0 e0
+
+. 
+. qui reg ln_avg_price ln_supply ln_bidders ln_warning t i.month L1_ln_avg ///
+>     if train==1 & anomaly==0
+
+. local sigma2_MD4 = e(rmse)^2
+
+. qui predict plog
+
+. qui gen p0 = exp(plog + `sigma2_MD4'/2)
+
+. qui gen e0 = avg_price - p0
+
+. 
+. scalar mae_MD4  = 0
+
+. scalar sse_MD4  = 0
+
+. scalar mape_MD4 = 0
+
+. scalar cnt_MD4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum avg_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     qui sum year if t==`tv'
+ 10.     local yr = r(mean)
+ 11.     qui sum month if t==`tv'
+ 12.     local mo = r(mean)
+ 13.     scalar mae_MD4  = mae_MD4  + `ae'
+ 14.     scalar sse_MD4  = sse_MD4  + (`e')^2
+ 15.     scalar mape_MD4 = mape_MD4 + `pe'
+ 16.     scalar cnt_MD4  = cnt_MD4  + 1
+ 17.     file write fout "MD4" _tab "avg_price" _tab "log->level" _tab "`yr'" _
+> tab "`mo'" ///
+>         _tab "`a'" _tab %8.1f (`p') _tab %8.1f (`e') _tab %8.1f (`ae') _tab %
+> 6.2f (`pe') _n
+ 18. }
+
+. scalar mae_MD4  = mae_MD4  / cnt_MD4
+
+. scalar rmse_MD4 = sqrt(sse_MD4 / cnt_MD4)
+
+. scalar mape_MD4 = mape_MD4 / cnt_MD4
+
+. di "MD4: MAE=" mae_MD4 "  RMSE=" rmse_MD4 "  MAPE=" mape_MD4
+MD4: MAE=682.55781  RMSE=732.41518  MAPE=.72710273
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_MD4_`tv' = r(mean)
+  4. }
+
+. 
+. drop plog p0 e0
+
+. 
+. *===========================================================================
+. * SECTION 2 – Full-sample models (no warning_price, 2010+)
+. *===========================================================================
+. 
+. *---------------------------------------------------------------------------
+. * FA4: Level min_price  supply bidders t i.month L1_min
+. *---------------------------------------------------------------------------
+. capture drop p0 e0
+
+. 
+. qui reg min_price supply bidders t i.month L1_min ///
+>     if train==1 & anomaly==0
+
+. qui predict p0
+
+. qui gen e0 = min_price - p0
+
+. 
+. scalar mae_FA4  = 0
+
+. scalar sse_FA4  = 0
+
+. scalar mape_FA4 = 0
+
+. scalar cnt_FA4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum min_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     qui sum year if t==`tv'
+ 10.     local yr = r(mean)
+ 11.     qui sum month if t==`tv'
+ 12.     local mo = r(mean)
+ 13.     scalar mae_FA4  = mae_FA4  + `ae'
+ 14.     scalar sse_FA4  = sse_FA4  + (`e')^2
+ 15.     scalar mape_FA4 = mape_FA4 + `pe'
+ 16.     scalar cnt_FA4  = cnt_FA4  + 1
+ 17.     file write fout "FA4" _tab "min_price" _tab "level" _tab "`yr'" _tab "
+> `mo'" ///
+>         _tab "`a'" _tab %8.1f (`p') _tab %8.1f (`e') _tab %8.1f (`ae') _tab %
+> 6.2f (`pe') _n
+ 18. }
+
+. scalar mae_FA4  = mae_FA4  / cnt_FA4
+
+. scalar rmse_FA4 = sqrt(sse_FA4 / cnt_FA4)
+
+. scalar mape_FA4 = mape_FA4 / cnt_FA4
+
+. di "FA4: MAE=" mae_FA4 "  RMSE=" rmse_FA4 "  MAPE=" mape_FA4
+FA4: MAE=1070.1453  RMSE=1195.9403  MAPE=1.1398683
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_FA4_`tv' = r(mean)
+  4. }
+
+. 
+. drop p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * FB4: Log min_price  ln_supply ln_bidders t i.month L1_ln_min
+. *---------------------------------------------------------------------------
+. capture drop plog p0 e0
+
+. 
+. qui reg ln_min_price ln_supply ln_bidders t i.month L1_ln_min ///
+>     if train==1 & anomaly==0
+
+. local sigma2_FB4 = e(rmse)^2
+
+. qui predict plog
+
+. qui gen p0 = exp(plog + `sigma2_FB4'/2)
+
+. qui gen e0 = min_price - p0
+
+. 
+. scalar mae_FB4  = 0
+
+. scalar sse_FB4  = 0
+
+. scalar mape_FB4 = 0
+
+. scalar cnt_FB4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum min_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     qui sum year if t==`tv'
+ 10.     local yr = r(mean)
+ 11.     qui sum month if t==`tv'
+ 12.     local mo = r(mean)
+ 13.     scalar mae_FB4  = mae_FB4  + `ae'
+ 14.     scalar sse_FB4  = sse_FB4  + (`e')^2
+ 15.     scalar mape_FB4 = mape_FB4 + `pe'
+ 16.     scalar cnt_FB4  = cnt_FB4  + 1
+ 17.     file write fout "FB4" _tab "min_price" _tab "log->level" _tab "`yr'" _
+> tab "`mo'" ///
+>         _tab "`a'" _tab %8.1f (`p') _tab %8.1f (`e') _tab %8.1f (`ae') _tab %
+> 6.2f (`pe') _n
+ 18. }
+
+. scalar mae_FB4  = mae_FB4  / cnt_FB4
+
+. scalar rmse_FB4 = sqrt(sse_FB4 / cnt_FB4)
+
+. scalar mape_FB4 = mape_FB4 / cnt_FB4
+
+. di "FB4: MAE=" mae_FB4 "  RMSE=" rmse_FB4 "  MAPE=" mape_FB4
+FB4: MAE=2512.8484  RMSE=3114.0816  MAPE=2.6749949
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_FB4_`tv' = r(mean)
+  4. }
+
+. 
+. drop plog p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * FC4: Level avg_price  supply bidders t i.month L1_avg
+. *---------------------------------------------------------------------------
+. capture drop p0 e0
+
+. 
+. qui reg avg_price supply bidders t i.month L1_avg ///
+>     if train==1 & anomaly==0
+
+. qui predict p0
+
+. qui gen e0 = avg_price - p0
+
+. 
+. scalar mae_FC4  = 0
+
+. scalar sse_FC4  = 0
+
+. scalar mape_FC4 = 0
+
+. scalar cnt_FC4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum avg_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     qui sum year if t==`tv'
+ 10.     local yr = r(mean)
+ 11.     qui sum month if t==`tv'
+ 12.     local mo = r(mean)
+ 13.     scalar mae_FC4  = mae_FC4  + `ae'
+ 14.     scalar sse_FC4  = sse_FC4  + (`e')^2
+ 15.     scalar mape_FC4 = mape_FC4 + `pe'
+ 16.     scalar cnt_FC4  = cnt_FC4  + 1
+ 17.     file write fout "FC4" _tab "avg_price" _tab "level" _tab "`yr'" _tab "
+> `mo'" ///
+>         _tab "`a'" _tab %8.1f (`p') _tab %8.1f (`e') _tab %8.1f (`ae') _tab %
+> 6.2f (`pe') _n
+ 18. }
+
+. scalar mae_FC4  = mae_FC4  / cnt_FC4
+
+. scalar rmse_FC4 = sqrt(sse_FC4 / cnt_FC4)
+
+. scalar mape_FC4 = mape_FC4 / cnt_FC4
+
+. di "FC4: MAE=" mae_FC4 "  RMSE=" rmse_FC4 "  MAPE=" mape_FC4
+FC4: MAE=1041.4656  RMSE=1147.818  MAPE=1.1093469
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_FC4_`tv' = r(mean)
+  4. }
+
+. 
+. drop p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * FD4: Log avg_price  ln_supply ln_bidders t i.month L1_ln_avg
+. *---------------------------------------------------------------------------
+. capture drop plog p0 e0
+
+. 
+. qui reg ln_avg_price ln_supply ln_bidders t i.month L1_ln_avg ///
+>     if train==1 & anomaly==0
+
+. local sigma2_FD4 = e(rmse)^2
+
+. qui predict plog
+
+. qui gen p0 = exp(plog + `sigma2_FD4'/2)
+
+. qui gen e0 = avg_price - p0
+
+. 
+. scalar mae_FD4  = 0
+
+. scalar sse_FD4  = 0
+
+. scalar mape_FD4 = 0
+
+. scalar cnt_FD4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum avg_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     qui sum year if t==`tv'
+ 10.     local yr = r(mean)
+ 11.     qui sum month if t==`tv'
+ 12.     local mo = r(mean)
+ 13.     scalar mae_FD4  = mae_FD4  + `ae'
+ 14.     scalar sse_FD4  = sse_FD4  + (`e')^2
+ 15.     scalar mape_FD4 = mape_FD4 + `pe'
+ 16.     scalar cnt_FD4  = cnt_FD4  + 1
+ 17.     file write fout "FD4" _tab "avg_price" _tab "log->level" _tab "`yr'" _
+> tab "`mo'" ///
+>         _tab "`a'" _tab %8.1f (`p') _tab %8.1f (`e') _tab %8.1f (`ae') _tab %
+> 6.2f (`pe') _n
+ 18. }
+
+. scalar mae_FD4  = mae_FD4  / cnt_FD4
+
+. scalar rmse_FD4 = sqrt(sse_FD4 / cnt_FD4)
+
+. scalar mape_FD4 = mape_FD4 / cnt_FD4
+
+. di "FD4: MAE=" mae_FD4 "  RMSE=" rmse_FD4 "  MAPE=" mape_FD4
+FD4: MAE=2020.7047  RMSE=2449.1714  MAPE=2.1506778
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_FD4_`tv' = r(mean)
+  4. }
+
+. 
+. drop plog p0 e0
+
+. 
+. file close fout
+
+. 
+. *===========================================================================
+. * WRITE MARKDOWN SUMMARY
+. *===========================================================================
+. 
+. file open mout using "results/prediction_results.md", write replace
+(file results/prediction_results.md not found)
+
+. 
+. file write mout "# Out-of-Sample Prediction Results" _n _n
+
+. file write mout "## Test Period: 2025m10 - 2026m2 (5 observations)" _n _n
+
+. file write mout "> Training sample: 2010m1-2025m9 (anomaly month 2010m12 excl
+> uded)." _n
+
+. file write mout "> Models with warning_price use 2014m1 onward (when warning_
+> price first available)." _n
+
+. file write mout "> Log models use Duan smearing adjustment: pred_level = exp(
+> pred_log + sigma2/2)." _n _n
+
+. 
+. *--- Section 1: Minimum Price Models ---
+. file write mout "### Minimum Price Models" _n _n
+
+. file write mout "| Model | Type | MAE (Yuan) | RMSE (Yuan) | MAPE (%) |" _n
+
+. file write mout "|-------|------|------------|-------------|----------|" _n
+
+. 
+. file write mout "| MA4 | Level (with warning_price) | " ///
+>     %8.0f (mae_MA4) " | " %8.0f (rmse_MA4) " | " %5.2f (mape_MA4) " |" _n
+
+. 
+. file write mout "| MB4 | Log-to-Level (with warning_price) | " ///
+>     %8.0f (mae_MB4) " | " %8.0f (rmse_MB4) " | " %5.2f (mape_MB4) " |" _n
+
+. 
+. file write mout "| FA4 | Level (no warning, full sample) | " ///
+>     %8.0f (mae_FA4) " | " %8.0f (rmse_FA4) " | " %5.2f (mape_FA4) " |" _n
+
+. 
+. file write mout "| FB4 | Log-to-Level (no warning, full sample) | " ///
+>     %8.0f (mae_FB4) " | " %8.0f (rmse_FB4) " | " %5.2f (mape_FB4) " |" _n
+
+. 
+. file write mout _n
+
+. 
+. *--- Section 2: Average Price Models ---
+. file write mout "### Average Price Models" _n _n
+
+. file write mout "| Model | Type | MAE (Yuan) | RMSE (Yuan) | MAPE (%) |" _n
+
+. file write mout "|-------|------|------------|-------------|----------|" _n
+
+. 
+. file write mout "| MC4 | Level (with warning_price) | " ///
+>     %8.0f (mae_MC4) " | " %8.0f (rmse_MC4) " | " %5.2f (mape_MC4) " |" _n
+
+. 
+. file write mout "| MD4 | Log-to-Level (with warning_price) | " ///
+>     %8.0f (mae_MD4) " | " %8.0f (rmse_MD4) " | " %5.2f (mape_MD4) " |" _n
+
+. 
+. file write mout "| FC4 | Level (no warning, full sample) | " ///
+>     %8.0f (mae_FC4) " | " %8.0f (rmse_FC4) " | " %5.2f (mape_FC4) " |" _n
+
+. 
+. file write mout "| FD4 | Log-to-Level (no warning, full sample) | " ///
+>     %8.0f (mae_FD4) " | " %8.0f (rmse_FD4) " | " %5.2f (mape_FD4) " |" _n
+
+. 
+. file write mout _n
+
+. 
+. *--- Section 3: Detailed per-period predictions ---
+. file write mout "### Detailed Predictions" _n _n
+
+. file write mout "#### Minimum Price" _n _n
+
+. file write mout "| Period | Actual | Pred MA4 | Err MA4 | Pred MB4 | Err MB4 
+> | Pred FA4 | Err FA4 | Pred FB4 | Err FB4 |" _n
+
+. file write mout "|--------|--------|----------|---------|----------|---------
+> |----------|---------|----------|---------|" _n
+
+. 
+. foreach tv of local test_ts {
+  2.     local yr_v  = scalar(yr_`tv')
+  3.     local mo_v  = scalar(mo_`tv')
+  4.     local a_min = scalar(act_min_`tv')
+  5.     local pMA4  = scalar(pred_MA4_`tv')
+  6.     local pMB4  = scalar(pred_MB4_`tv')
+  7.     local pFA4  = scalar(pred_FA4_`tv')
+  8.     local pFB4  = scalar(pred_FB4_`tv')
+  9.     local eMA4  = `a_min' - `pMA4'
+ 10.     local eMB4  = `a_min' - `pMB4'
+ 11.     local eFA4  = `a_min' - `pFA4'
+ 12.     local eFB4  = `a_min' - `pFB4'
+ 13.     file write mout "| " %4.0f (`yr_v') "m" %02.0f (`mo_v') " | " ///
+>         %8.0f (`a_min') " | " %8.1f (`pMA4') " | " %8.1f (`eMA4') " | " ///
+>         %8.1f (`pMB4') " | " %8.1f (`eMB4') " | " ///
+>         %8.1f (`pFA4') " | " %8.1f (`eFA4') " | " ///
+>         %8.1f (`pFB4') " | " %8.1f (`eFB4') " |" _n
+ 14. }
+
+. 
+. file write mout _n
+
+. 
+. file write mout "#### Average Price" _n _n
+
+. file write mout "| Period | Actual | Pred MC4 | Err MC4 | Pred MD4 | Err MD4 
+> | Pred FC4 | Err FC4 | Pred FD4 | Err FD4 |" _n
+
+. file write mout "|--------|--------|----------|---------|----------|---------
+> |----------|---------|----------|---------|" _n
+
+. 
+. foreach tv of local test_ts {
+  2.     local yr_v  = scalar(yr_`tv')
+  3.     local mo_v  = scalar(mo_`tv')
+  4.     local a_avg = scalar(act_avg_`tv')
+  5.     local pMC4  = scalar(pred_MC4_`tv')
+  6.     local pMD4  = scalar(pred_MD4_`tv')
+  7.     local pFC4  = scalar(pred_FC4_`tv')
+  8.     local pFD4  = scalar(pred_FD4_`tv')
+  9.     local eMC4  = `a_avg' - `pMC4'
+ 10.     local eMD4  = `a_avg' - `pMD4'
+ 11.     local eFC4  = `a_avg' - `pFC4'
+ 12.     local eFD4  = `a_avg' - `pFD4'
+ 13.     file write mout "| " %4.0f (`yr_v') "m" %02.0f (`mo_v') " | " ///
+>         %8.0f (`a_avg') " | " %8.1f (`pMC4') " | " %8.1f (`eMC4') " | " ///
+>         %8.1f (`pMD4') " | " %8.1f (`eMD4') " | " ///
+>         %8.1f (`pFC4') " | " %8.1f (`eFC4') " | " ///
+>         %8.1f (`pFD4') " | " %8.1f (`eFD4') " |" _n
+ 14. }
+
+. 
+. file write mout _n
+
+. 
+. *--- Section 4: Best model summary ---
+. file write mout "### Model Selection Guidance" _n _n
+
+. file write mout "Lower MAE/RMSE/MAPE indicates better out-of-sample predictiv
+> e accuracy." _n _n
+
+. file write mout "| Metric | Best Min-Price Model | Best Avg-Price Model |" _n
+
+. file write mout "|--------|---------------------|---------------------|" _n
+
+. 
+. * Determine best min-price model by RMSE
+. local best_min_rmse = min(rmse_MA4, rmse_MB4, rmse_FA4, rmse_FB4)
+
+. local best_min = "MA4"
+
+. if `best_min_rmse' == rmse_MB4 local best_min "MB4"
+
+. if `best_min_rmse' == rmse_FA4 local best_min "FA4"
+
+. if `best_min_rmse' == rmse_FB4 local best_min "FB4"
+
+. 
+. * Determine best avg-price model by RMSE
+. local best_avg_rmse = min(rmse_MC4, rmse_MD4, rmse_FC4, rmse_FD4)
+
+. local best_avg = "MC4"
+
+. if `best_avg_rmse' == rmse_MD4 local best_avg "MD4"
+
+. if `best_avg_rmse' == rmse_FC4 local best_avg "FC4"
+
+. if `best_avg_rmse' == rmse_FD4 local best_avg "FD4"
+
+. 
+. file write mout "| RMSE | `best_min' (" %8.0f (`best_min_rmse') " Yuan) | `be
+> st_avg' (" %8.0f (`best_avg_rmse') " Yuan) |" _n
+
+. 
+. file write mout _n
+
+. file write mout "---" _n
+
+. file write mout "_Generated by 04_prediction.do_" _n
+
+. 
+. file close mout
+
+. 
+. di "=== Markdown written to results/prediction_results.md ==="
+=== Markdown written to results/prediction_results.md ===
+
+. di "=== Detail written to results/prediction_detail.txt ==="
+=== Detail written to results/prediction_detail.txt ===
+
+. di "=== 04_prediction.do completed ==="
+=== 04_prediction.do completed ===
+
+. 
+. log close
+      name:  <unnamed>
+       log:  /home/aragorn/Working/chepai_data/log/04_prediction.log
+  log type:  text
+ closed on:  26 Mar 2026, 15:53:48
+-------------------------------------------------------------------------------
+
+. 
+end of do-file

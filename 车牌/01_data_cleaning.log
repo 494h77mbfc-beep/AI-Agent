@@ -1,0 +1,956 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      Stata 18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-782-8272        https://www.stata.com
+                                   979-696-4600        service@stata.com
+
+Stata license: Single-user 16-core  perpetual
+Serial number: 501806307019
+  Licensed to: Keep calm and DO your research
+               Jichun Si
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+. do 01_data_cleaning.do 
+
+. /*===========================================================================
+>   01_data_cleaning.do
+>   Shanghai Car License Plate Auction Data - Cleaning & Variable Construction
+>   Data: 2010m1 - 2026m2 (194 observations)
+>   Author: Sisyphus
+>   Date: 2026-03-26
+> ===========================================================================*/
+. 
+. clear all
+
+. set more off
+
+. capture log close
+
+. 
+. * Set working directory
+. cd "/home/aragorn/Working/chepai_data"
+/home/aragorn/Working/chepai_data
+
+. 
+. * Create log
+. log using "log/01_data_cleaning.log", replace text
+-------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  /home/aragorn/Working/chepai_data/log/01_data_cleaning.log
+  log type:  text
+ opened on:  26 Mar 2026, 15:40:44
+
+. 
+. *---------------------------------------------------------------------------
+. * 1. IMPORT DATA
+. *---------------------------------------------------------------------------
+. import delimited "shanghai_car_license_auction_2010_2026.csv", ///
+>     encoding(UTF-8) varnames(1) clear
+(7 vars, 194 obs)
+
+. 
+. * Check import
+. describe
+
+Contains data
+ Observations:           194                  
+    Variables:             7                  
+-------------------------------------------------------------------------------
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+-------------------------------------------------------------------------------
+拍卖时间        str12   %12s                  
+投放数量        int     %8.0g                 
+最低成交价      long    %12.0g                
+平均成交价      long    %12.0g                
+最低成交价截~间 str18   %18s                  
+投标人数        long    %12.0g                
+警示价          long    %12.0g                
+-------------------------------------------------------------------------------
+Sorted by: 
+     Note: Dataset has changed since last saved.
+
+. list in 1/3
+
+     +----------------------------------------------------------------------+
+  1. |  拍卖时间 | 投放数量 | 最低~价 | 平均~价 |  最低成交价~间 | 投标人数 |
+     | 2010年1月 |     8000 |   37800 |   38311 |  11:29:34第9位 |    18975 |
+     |----------------------------------------------------------------------|
+     |                                警示价                                |
+     |                                     .                                |
+     +----------------------------------------------------------------------+
+
+     +----------------------------------------------------------------------+
+  2. |  拍卖时间 | 投放数量 | 最低~价 | 平均~价 |  最低成交价~间 | 投标人数 |
+     | 2010年2月 |     7500 |   38300 |   38620 | 11:29:39第52位 |    18810 |
+     |----------------------------------------------------------------------|
+     |                                警示价                                |
+     |                                     .                                |
+     +----------------------------------------------------------------------+
+
+     +----------------------------------------------------------------------+
+  3. |  拍卖时间 | 投放数量 | 最低~价 | 平均~价 |  最低成交价~间 | 投标人数 |
+     | 2010年3月 |     8000 |   39600 |   39882 |  11:29:18第9位 |    17704 |
+     |----------------------------------------------------------------------|
+     |                                警示价                                |
+     |                                     .                                |
+     +----------------------------------------------------------------------+
+
+. 
+. * Rename variables to English names
+. * (Stata imports Chinese column headers as Chinese variable names)
+. rename 拍卖时间        time_str
+
+. rename 投放数量        supply
+
+. rename 最低成交价      min_price
+
+. rename 平均成交价      avg_price
+
+. rename 最低成交价截止时间 cutoff_time
+
+. rename 投标人数        bidders
+
+. rename 警示价          warning_price
+
+. 
+. * Confirm rename
+. describe
+
+Contains data
+ Observations:           194                  
+    Variables:             7                  
+-------------------------------------------------------------------------------
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+-------------------------------------------------------------------------------
+time_str        str12   %12s                  
+supply          int     %8.0g                 
+min_price       long    %12.0g                
+avg_price       long    %12.0g                
+cutoff_time     str18   %18s                  
+bidders         long    %12.0g                
+warning_price   long    %12.0g                
+-------------------------------------------------------------------------------
+Sorted by: 
+     Note: Dataset has changed since last saved.
+
+. 
+. *---------------------------------------------------------------------------
+. * 2. PARSE CHINESE DATE STRINGS
+. *---------------------------------------------------------------------------
+. * Extract year and month from strings like "2010年1月"
+. gen year  = .
+(194 missing values generated)
+
+. gen month = .
+(194 missing values generated)
+
+. 
+. * Use regexm to match pattern: digits + 年 + digits + 月
+. * Note: Stata's regexm uses POSIX ERE; Chinese chars are fine as literals
+. forvalues i = 1/`=_N' {
+  2.     local s = time_str[`i']
+  3.     if regexm("`s'", "([0-9]+)年([0-9]+)月") {
+  4.         replace year  = real(regexs(1)) in `i'
+  5.         replace month = real(regexs(2)) in `i'
+  6.     }
+  7. }
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+(1 real change made)
+
+. 
+. * Verify extraction
+. assert !missing(year)
+
+. assert !missing(month)
+
+. assert year  >= 2010 & year  <= 2026
+
+. assert month >= 1    & month <= 12
+
+. 
+. * Generate time-series index: t=1 → January 2010
+. gen t = (year - 2010) * 12 + month
+
+. label var t "Time index (1 = Jan 2010)"
+
+. 
+. * Declare as monthly time series
+. tsset t
+
+Time variable: t, 1 to 194
+        Delta: 1 unit
+
+. 
+. * Confirm no gaps (should be 194 obs, t from 1 to 194)
+. sum t
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+           t |        194        97.5    56.14713          1        194
+
+. 
+. *---------------------------------------------------------------------------
+. * 3. HANDLE ANOMALOUS OBSERVATION
+. *---------------------------------------------------------------------------
+. * 2010m12: min_price = 10,400 yuan — clearly anomalous (all other months ~37,
+> 000+)
+. * Flagged with dummy; excluded from regressions via if !anomaly
+. gen byte anomaly = (year == 2010 & month == 12)
+
+. label var anomaly "Anomaly flag: 2010m12 min_price=10400 (system anomaly)"
+
+. 
+. * Show the anomalous observation
+. di _n "=== Anomalous observation ==="
+
+=== Anomalous observation ===
+
+. list year month min_price avg_price if anomaly == 1
+
+     +------------------------------------+
+     | year   month   min_pr~e   avg_pr~e |
+     |------------------------------------|
+ 12. | 2010      12      10400      15970 |
+     +------------------------------------+
+
+. 
+. *---------------------------------------------------------------------------
+. * 4. DERIVED VARIABLES
+. *---------------------------------------------------------------------------
+. * Bid intensity ratio
+. gen bid_ratio = bidders / supply
+
+. label var bid_ratio "Bid-to-supply ratio (bidders/supply)"
+
+. 
+. * Price spread
+. gen price_spread = avg_price - min_price
+
+. label var price_spread "Price spread: avg - min (Yuan)"
+
+. 
+. * Log transformations
+. gen ln_min_price = ln(min_price)
+
+. label var ln_min_price "Log minimum transaction price"
+
+. 
+. gen ln_avg_price = ln(avg_price)
+
+. label var ln_avg_price "Log average transaction price"
+
+. 
+. gen ln_bidders = ln(bidders)
+
+. label var ln_bidders "Log number of bidders"
+
+. 
+. gen ln_supply = ln(supply)
+
+. label var ln_supply "Log number of plates supplied"
+
+. 
+. * Log warning price (only defined from ~2014 onward; missing before)
+. gen ln_warning = ln(warning_price) if !missing(warning_price) & warning_price
+>  > 0
+(40 missing values generated)
+
+. label var ln_warning "Log warning price (reference floor price)"
+
+. 
+. *---------------------------------------------------------------------------
+. * 5. LAGGED VARIABLES (requires tsset)
+. *---------------------------------------------------------------------------
+. gen L1_min      = L.min_price
+(1 missing value generated)
+
+. gen L2_min      = L2.min_price
+(2 missing values generated)
+
+. gen L1_avg      = L.avg_price
+(1 missing value generated)
+
+. gen L1_bidders  = L.bidders
+(1 missing value generated)
+
+. gen L1_supply   = L.supply
+(1 missing value generated)
+
+. gen L1_ln_min   = L.ln_min_price
+(1 missing value generated)
+
+. gen L1_ln_avg   = L.ln_avg_price
+(1 missing value generated)
+
+. gen L1_ln_bidders = L.ln_bidders
+(1 missing value generated)
+
+. gen L1_warning  = L.warning_price
+(41 missing values generated)
+
+. gen L1_ln_warning = L.ln_warning
+(41 missing values generated)
+
+. 
+. label var L1_min       "Lag 1: minimum price"
+
+. label var L2_min       "Lag 2: minimum price"
+
+. label var L1_avg       "Lag 1: average price"
+
+. label var L1_bidders   "Lag 1: number of bidders"
+
+. label var L1_supply    "Lag 1: supply"
+
+. label var L1_ln_min    "Lag 1: log minimum price"
+
+. label var L1_ln_avg    "Lag 1: log average price"
+
+. label var L1_ln_bidders "Lag 1: log bidders"
+
+. label var L1_warning   "Lag 1: warning price"
+
+. label var L1_ln_warning "Lag 1: log warning price"
+
+. 
+. *---------------------------------------------------------------------------
+. * 6. POLYNOMIAL AND INTERACTION TERMS
+. *---------------------------------------------------------------------------
+. gen t2 = t^2
+
+. label var t2 "Time trend squared"
+
+. 
+. * Scale to avoid numerical issues in regression
+. gen bidders2 = bidders^2 / 1e8
+
+. label var bidders2 "Bidders squared / 1e8 (scaled)"
+
+. 
+. gen supply_bidders = supply * bidders / 1e6
+
+. label var supply_bidders "Supply x bidders / 1e6 (scaled interaction)"
+
+. 
+. *---------------------------------------------------------------------------
+. * 7. TRAIN / TEST SPLIT
+. *---------------------------------------------------------------------------
+. * Training set: up to and including 2025m9
+. * Test set: 2025m10 onward (last 5 observations)
+. gen byte train = (year < 2025 | (year == 2025 & month <= 9))
+
+. gen byte test  = 1 - train
+
+. 
+. label var train "Train set indicator (up to 2025m9 inclusive)"
+
+. label var test  "Test set indicator (2025m10 onward)"
+
+. 
+. di _n "=== Train/Test split ==="
+
+=== Train/Test split ===
+
+. tab train
+
+  Train set |
+  indicator |
+     (up to |
+     2025m9 |
+ inclusive) |      Freq.     Percent        Cum.
+------------+-----------------------------------
+          0 |          5        2.58        2.58
+          1 |        189       97.42      100.00
+------------+-----------------------------------
+      Total |        194      100.00
+
+. di "Train obs: " %3.0f sum(train)
+Train obs:   1
+
+. di "Test  obs: " %3.0f sum(test)
+Test  obs:   0
+
+. 
+. * Confirm test set is exactly 2025m10 - 2026m2
+. list year month if test == 1
+
+     +--------------+
+     | year   month |
+     |--------------|
+190. | 2025      10 |
+191. | 2025      11 |
+192. | 2025      12 |
+193. | 2026       1 |
+194. | 2026       2 |
+     +--------------+
+
+. 
+. *---------------------------------------------------------------------------
+. * 8. VARIABLE LABELS (remaining)
+. *---------------------------------------------------------------------------
+. label var time_str    "Date string (Chinese format)"
+
+. label var supply      "Number of plates supplied"
+
+. label var min_price   "Minimum transaction price (Yuan)"
+
+. label var avg_price   "Average transaction price (Yuan)"
+
+. label var cutoff_time "Cutoff time string for minimum price"
+
+. label var bidders     "Number of bidders"
+
+. label var warning_price "Warning/reference floor price (Yuan)"
+
+. label var year        "Year"
+
+. label var month       "Month"
+
+. 
+. *---------------------------------------------------------------------------
+. * 9. FINAL CHECKS & SUMMARY STATISTICS
+. *---------------------------------------------------------------------------
+. describe
+
+Contains data
+ Observations:           194                  
+    Variables:            33                  
+-------------------------------------------------------------------------------
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+-------------------------------------------------------------------------------
+time_str        str12   %12s                  Date string (Chinese format)
+supply          int     %8.0g                 Number of plates supplied
+min_price       long    %12.0g                Minimum transaction price (Yuan)
+avg_price       long    %12.0g                Average transaction price (Yuan)
+cutoff_time     str18   %18s                  Cutoff time string for minimum
+                                                price
+bidders         long    %12.0g                Number of bidders
+warning_price   long    %12.0g                Warning/reference floor price
+                                                (Yuan)
+year            float   %9.0g                 Year
+month           float   %9.0g                 Month
+t               float   %9.0g                 Time index (1 = Jan 2010)
+anomaly         byte    %8.0g                 Anomaly flag: 2010m12
+                                                min_price=10400 (system
+                                                anomaly)
+bid_ratio       float   %9.0g                 Bid-to-supply ratio
+                                                (bidders/supply)
+price_spread    float   %9.0g                 Price spread: avg - min (Yuan)
+ln_min_price    float   %9.0g                 Log minimum transaction price
+ln_avg_price    float   %9.0g                 Log average transaction price
+ln_bidders      float   %9.0g                 Log number of bidders
+ln_supply       float   %9.0g                 Log number of plates supplied
+ln_warning      float   %9.0g                 Log warning price (reference
+                                                floor price)
+L1_min          float   %9.0g                 Lag 1: minimum price
+L2_min          float   %9.0g                 Lag 2: minimum price
+L1_avg          float   %9.0g                 Lag 1: average price
+L1_bidders      float   %9.0g                 Lag 1: number of bidders
+L1_supply       float   %9.0g                 Lag 1: supply
+L1_ln_min       float   %9.0g                 Lag 1: log minimum price
+L1_ln_avg       float   %9.0g                 Lag 1: log average price
+L1_ln_bidders   float   %9.0g                 Lag 1: log bidders
+L1_warning      float   %9.0g                 Lag 1: warning price
+L1_ln_warning   float   %9.0g                 Lag 1: log warning price
+t2              float   %9.0g                 Time trend squared
+bidders2        float   %9.0g                 Bidders squared / 1e8 (scaled)
+supply_bidders  float   %9.0g                 Supply x bidders / 1e6 (scaled
+                                                interaction)
+train           byte    %8.0g                 Train set indicator (up to 2025m9
+                                                inclusive)
+test            byte    %8.0g                 Test set indicator (2025m10
+                                                onward)
+-------------------------------------------------------------------------------
+Sorted by: t
+     Note: Dataset has changed since last saved.
+
+. 
+. di _n "=== Summary statistics ==="
+
+=== Summary statistics ===
+
+. sum min_price avg_price supply bidders warning_price bid_ratio price_spread /
+> //
+>     ln_min_price ln_avg_price
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+   min_price |        194    80671.65    16904.37      10400      94500
+   avg_price |        194    80899.93    16618.64      15970      94599
+      supply |        194    9814.546    3216.741       3784      18933
+     bidders |        194    119234.2    82798.01      11224     277889
+warning_pr~e |        154    86635.71    6140.923      72600      92900
+-------------+---------------------------------------------------------
+   bid_ratio |        194    11.96325    7.401347   1.247111   26.60758
+price_spread |        194    228.2784    499.0019          0       5570
+ln_min_price |        194    11.26616    .2848457   9.249561   11.45636
+ln_avg_price |        194    11.27166    .2667045   9.678467    11.4574
+
+. 
+. di _n "=== Missing values check ==="
+
+=== Missing values check ===
+
+. sum L1_min L2_min L1_avg L1_warning
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+      L1_min |        193    80602.07    16920.46      10400      94500
+      L2_min |        192    80531.77    16936.41      10400      94500
+      L1_avg |        193    80831.53    16634.46      15970      94599
+  L1_warning |        153    86594.77    6139.966      72600      92900
+
+. 
+. di _n "=== Anomalous observation detail ==="
+
+=== Anomalous observation detail ===
+
+. list year month min_price avg_price bidders supply if anomaly == 1
+
+     +-------------------------------------------------------+
+     | year   month   min_pr~e   avg_pr~e   bidders   supply |
+     |-------------------------------------------------------|
+ 12. | 2010      12      10400      15970     11224     9000 |
+     +-------------------------------------------------------+
+
+. 
+. *---------------------------------------------------------------------------
+. * 10. SAVE DATA
+. *---------------------------------------------------------------------------
+. * Ensure output directory exists
+. capture mkdir "data"
+
+. 
+. save "data/cleaned_data.dta", replace
+(file data/cleaned_data.dta not found)
+file data/cleaned_data.dta saved
+
+. export delimited "data/cleaned_data.csv", replace
+(file data/cleaned_data.csv not found)
+file data/cleaned_data.csv saved
+
+. 
+. di _n "=== Data saved successfully ==="
+
+=== Data saved successfully ===
+
+. di "DTA: data/cleaned_data.dta"
+DTA: data/cleaned_data.dta
+
+. di "CSV: data/cleaned_data.csv"
+CSV: data/cleaned_data.csv
+
+. di "Total observations: " _N
+Total observations: 194
+
+. 
+. log close
+      name:  <unnamed>
+       log:  /home/aragorn/Working/chepai_data/log/01_data_cleaning.log
+  log type:  text
+ closed on:  26 Mar 2026, 15:40:44
+-------------------------------------------------------------------------------
+
+. 
+end of do-file

@@ -1,0 +1,708 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      Stata 18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-782-8272        https://www.stata.com
+                                   979-696-4600        service@stata.com
+
+Stata license: Single-user 16-core  perpetual
+Serial number: 501806307019
+  Licensed to: Keep calm and DO your research
+               Jichun Si
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+. do 07_weighted_prediction.do 
+
+. /*===========================================================================
+>   07_weighted_prediction.do
+>   Out-of-Sample Prediction: Time-Weighted WLS vs Unweighted OLS
+>   Models: WA4, WB4, WC4, WD4 (weighted, [aw=t])
+>   Compared against: MA4, MB4, MC4, MD4 (unweighted OLS benchmarks)
+> ===========================================================================*/
+. 
+. clear all
+
+. set more off
+
+. capture log close sublog07
+
+. cd "/home/aragorn/Working/chepai_data"
+/home/aragorn/Working/chepai_data
+
+. use "data/cleaned_data.dta", clear
+
+. capture mkdir "results"
+
+. capture mkdir "log"
+
+. log using "log/07_weighted_prediction.log", name(sublog07) replace text
+(file /home/aragorn/Working/chepai_data/log/07_weighted_prediction.log not
+    found)
+-------------------------------------------------------------------------------
+      name:  sublog07
+       log:  /home/aragorn/Working/chepai_data/log/07_weighted_prediction.log
+  log type:  text
+ opened on:  26 Mar 2026, 16:34:19
+
+. 
+. di "=== 07_weighted_prediction.do: WLS vs OLS out-of-sample prediction ==="
+=== 07_weighted_prediction.do: WLS vs OLS out-of-sample prediction ===
+
+. di "=== Weighting: analytic weight = t (linear time weight) ==="
+=== Weighting: analytic weight = t (linear time weight) ===
+
+. 
+. * ── display test set ───────────────────────────────────────────────────────
+> ─
+. di "=== Test set observations ==="
+=== Test set observations ===
+
+. list year month min_price avg_price warning_price supply bidders if test==1
+
+     +------------------------------------------------------------------+
+     | year   month   min_pr~e   avg_pr~e   warnin~e   supply   bidders |
+     |------------------------------------------------------------------|
+190. | 2025      10      93600      93600      92400     3980     43279 |
+191. | 2025      11      93600      93714      92400     3821     40659 |
+192. | 2025      12      93900      93900      92400     3818     42382 |
+193. | 2026       1      94100      94159      92900     3784     42564 |
+194. | 2026       2      94100      94100      92900     3793     39780 |
+     +------------------------------------------------------------------+
+
+. 
+. * Collect test period t values
+. qui levelsof t if test==1, local(test_ts)
+
+. di "Test t values: `test_ts'"
+Test t values: 190 191 192 193 194
+
+. 
+. *===========================================================================
+. * SECTION 1 – Weighted WLS Models (analytic weight = t)
+. *===========================================================================
+. 
+. *---------------------------------------------------------------------------
+. * WA4: Level min_price  [aw=t]
+. *---------------------------------------------------------------------------
+. capture drop p0 e0
+
+. 
+. qui reg min_price supply bidders warning_price t i.month L1_min [aw=t] if tra
+> in==1 & anomaly==0
+
+. qui predict p0
+
+. qui gen e0 = min_price - p0
+
+. 
+. scalar mae_WA4  = 0
+
+. scalar sse_WA4  = 0
+
+. scalar mape_WA4 = 0
+
+. scalar cnt_WA4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum min_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     scalar mae_WA4  = mae_WA4  + `ae'
+ 10.     scalar sse_WA4  = sse_WA4  + (`e')^2
+ 11.     scalar mape_WA4 = mape_WA4 + `pe'
+ 12.     scalar cnt_WA4  = cnt_WA4  + 1
+ 13. }
+
+. scalar mae_WA4  = mae_WA4  / cnt_WA4
+
+. scalar rmse_WA4 = sqrt(sse_WA4 / cnt_WA4)
+
+. scalar mape_WA4 = mape_WA4 / cnt_WA4
+
+. di "WA4: MAE=" mae_WA4 "  RMSE=" rmse_WA4 "  MAPE=" mape_WA4
+WA4: MAE=547.82969  RMSE=590.55121  MAPE=.58383436
+
+. 
+. * Save per-period predictions
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_WA4_`tv' = r(mean)
+  4.     qui sum min_price if t==`tv'
+  5.     scalar act_min_`tv' = r(mean)
+  6.     qui sum year if t==`tv'
+  7.     scalar yr_`tv' = r(mean)
+  8.     qui sum month if t==`tv'
+  9.     scalar mo_`tv' = r(mean)
+ 10. }
+
+. 
+. drop p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * WB4: Log min_price  [aw=t] — Duan smearing adjustment
+. *---------------------------------------------------------------------------
+. capture drop plog p0 e0
+
+. 
+. qui reg ln_min_price ln_supply ln_bidders ln_warning t i.month L1_ln_min [aw=
+> t] if train==1 & anomaly==0
+
+. local sigma2_WB4 = e(rmse)^2
+
+. qui predict plog
+
+. qui gen p0 = exp(plog + `sigma2_WB4'/2)
+
+. qui gen e0 = min_price - p0
+
+. 
+. scalar mae_WB4  = 0
+
+. scalar sse_WB4  = 0
+
+. scalar mape_WB4 = 0
+
+. scalar cnt_WB4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum min_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     scalar mae_WB4  = mae_WB4  + `ae'
+ 10.     scalar sse_WB4  = sse_WB4  + (`e')^2
+ 11.     scalar mape_WB4 = mape_WB4 + `pe'
+ 12.     scalar cnt_WB4  = cnt_WB4  + 1
+ 13. }
+
+. scalar mae_WB4  = mae_WB4  / cnt_WB4
+
+. scalar rmse_WB4 = sqrt(sse_WB4 / cnt_WB4)
+
+. scalar mape_WB4 = mape_WB4 / cnt_WB4
+
+. di "WB4: MAE=" mae_WB4 "  RMSE=" rmse_WB4 "  MAPE=" mape_WB4
+WB4: MAE=623.28437  RMSE=658.60832  MAPE=.6641213
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_WB4_`tv' = r(mean)
+  4. }
+
+. 
+. drop plog p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * WC4: Level avg_price  [aw=t]
+. *---------------------------------------------------------------------------
+. capture drop p0 e0
+
+. 
+. qui reg avg_price supply bidders warning_price t i.month L1_avg [aw=t] if tra
+> in==1 & anomaly==0
+
+. qui predict p0
+
+. qui gen e0 = avg_price - p0
+
+. 
+. scalar mae_WC4  = 0
+
+. scalar sse_WC4  = 0
+
+. scalar mape_WC4 = 0
+
+. scalar cnt_WC4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum avg_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     scalar mae_WC4  = mae_WC4  + `ae'
+ 10.     scalar sse_WC4  = sse_WC4  + (`e')^2
+ 11.     scalar mape_WC4 = mape_WC4 + `pe'
+ 12.     scalar cnt_WC4  = cnt_WC4  + 1
+ 13. }
+
+. scalar mae_WC4  = mae_WC4  / cnt_WC4
+
+. scalar rmse_WC4 = sqrt(sse_WC4 / cnt_WC4)
+
+. scalar mape_WC4 = mape_WC4 / cnt_WC4
+
+. di "WC4: MAE=" mae_WC4 "  RMSE=" rmse_WC4 "  MAPE=" mape_WC4
+WC4: MAE=588.05938  RMSE=625.05744  MAPE=.6264328
+
+. 
+. * Save per-period predictions
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_WC4_`tv' = r(mean)
+  4.     qui sum avg_price if t==`tv'
+  5.     scalar act_avg_`tv' = r(mean)
+  6. }
+
+. 
+. drop p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * WD4: Log avg_price  [aw=t] — Duan smearing adjustment
+. *---------------------------------------------------------------------------
+. capture drop plog p0 e0
+
+. 
+. qui reg ln_avg_price ln_supply ln_bidders ln_warning t i.month L1_ln_avg [aw=
+> t] if train==1 & anomaly==0
+
+. local sigma2_WD4 = e(rmse)^2
+
+. qui predict plog
+
+. qui gen p0 = exp(plog + `sigma2_WD4'/2)
+
+. qui gen e0 = avg_price - p0
+
+. 
+. scalar mae_WD4  = 0
+
+. scalar sse_WD4  = 0
+
+. scalar mape_WD4 = 0
+
+. scalar cnt_WD4  = 0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     local p = r(mean)
+  4.     qui sum avg_price if t==`tv'
+  5.     local a = r(mean)
+  6.     local e = `a' - `p'
+  7.     local ae = abs(`e')
+  8.     local pe = abs(`e'/`a')*100
+  9.     scalar mae_WD4  = mae_WD4  + `ae'
+ 10.     scalar sse_WD4  = sse_WD4  + (`e')^2
+ 11.     scalar mape_WD4 = mape_WD4 + `pe'
+ 12.     scalar cnt_WD4  = cnt_WD4  + 1
+ 13. }
+
+. scalar mae_WD4  = mae_WD4  / cnt_WD4
+
+. scalar rmse_WD4 = sqrt(sse_WD4 / cnt_WD4)
+
+. scalar mape_WD4 = mape_WD4 / cnt_WD4
+
+. di "WD4: MAE=" mae_WD4 "  RMSE=" rmse_WD4 "  MAPE=" mape_WD4
+WD4: MAE=661.06406  RMSE=693.38545  MAPE=.70409193
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_WD4_`tv' = r(mean)
+  4. }
+
+. 
+. drop plog p0 e0
+
+. 
+. *===========================================================================
+. * SECTION 2 – Unweighted OLS Benchmarks (re-run for per-period predictions)
+. *===========================================================================
+. 
+. *---------------------------------------------------------------------------
+. * MA4: Level min_price (unweighted OLS)
+. *---------------------------------------------------------------------------
+. capture drop p0 e0
+
+. 
+. qui reg min_price supply bidders warning_price t i.month L1_min if train==1 &
+>  anomaly==0
+
+. qui predict p0
+
+. qui gen e0 = min_price - p0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_MA4_`tv' = r(mean)
+  4. }
+
+. 
+. drop p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * MB4: Log min_price (unweighted OLS) — Duan smearing
+. *---------------------------------------------------------------------------
+. capture drop plog p0 e0
+
+. 
+. qui reg ln_min_price ln_supply ln_bidders ln_warning t i.month L1_ln_min if t
+> rain==1 & anomaly==0
+
+. local sigma2_MB4 = e(rmse)^2
+
+. qui predict plog
+
+. qui gen p0 = exp(plog + `sigma2_MB4'/2)
+
+. qui gen e0 = min_price - p0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_MB4_`tv' = r(mean)
+  4. }
+
+. 
+. drop plog p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * MC4: Level avg_price (unweighted OLS)
+. *---------------------------------------------------------------------------
+. capture drop p0 e0
+
+. 
+. qui reg avg_price supply bidders warning_price t i.month L1_avg if train==1 &
+>  anomaly==0
+
+. qui predict p0
+
+. qui gen e0 = avg_price - p0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_MC4_`tv' = r(mean)
+  4. }
+
+. 
+. drop p0 e0
+
+. 
+. *---------------------------------------------------------------------------
+. * MD4: Log avg_price (unweighted OLS) — Duan smearing
+. *---------------------------------------------------------------------------
+. capture drop plog p0 e0
+
+. 
+. qui reg ln_avg_price ln_supply ln_bidders ln_warning t i.month L1_ln_avg if t
+> rain==1 & anomaly==0
+
+. local sigma2_MD4 = e(rmse)^2
+
+. qui predict plog
+
+. qui gen p0 = exp(plog + `sigma2_MD4'/2)
+
+. qui gen e0 = avg_price - p0
+
+. 
+. foreach tv of local test_ts {
+  2.     qui sum p0 if t==`tv'
+  3.     scalar pred_MD4_`tv' = r(mean)
+  4. }
+
+. 
+. drop plog p0 e0
+
+. 
+. *===========================================================================
+. * SECTION 3 – Summary to log
+. *===========================================================================
+. 
+. di _n "=== PREDICTION COMPARISON: WLS vs OLS ==="
+
+=== PREDICTION COMPARISON: WLS vs OLS ===
+
+. di "Model | MAE       | RMSE      | MAPE(%)"
+Model | MAE       | RMSE      | MAPE(%)
+
+. di "------|-----------|-----------|--------"
+------|-----------|-----------|--------
+
+. di "WA4   | " mae_WA4 " | " rmse_WA4 " | " mape_WA4
+WA4   | 547.82969 | 590.55121 | .58383436
+
+. di "WB4   | " mae_WB4 " | " rmse_WB4 " | " mape_WB4
+WB4   | 623.28437 | 658.60832 | .6641213
+
+. di "WC4   | " mae_WC4 " | " rmse_WC4 " | " mape_WC4
+WC4   | 588.05938 | 625.05744 | .6264328
+
+. di "WD4   | " mae_WD4 " | " rmse_WD4 " | " mape_WD4
+WD4   | 661.06406 | 693.38545 | .70409193
+
+. di _n "Hardcoded OLS benchmarks (from 04_prediction.do):"
+
+Hardcoded OLS benchmarks (from 04_prediction.do):
+
+. di "MA4: MAE=638  RMSE=687  MAPE=0.68%"
+MA4: MAE=638  RMSE=687  MAPE=0.68%
+
+. di "MB4: MAE=641  RMSE=684  MAPE=0.68%"
+MB4: MAE=641  RMSE=684  MAPE=0.68%
+
+. di "MC4: MAE=683  RMSE=734  MAPE=0.73%"
+MC4: MAE=683  RMSE=734  MAPE=0.73%
+
+. di "MD4: MAE=683  RMSE=732  MAPE=0.73%"
+MD4: MAE=683  RMSE=732  MAPE=0.73%
+
+. 
+. *===========================================================================
+. * SECTION 4 – Write Markdown report
+. *===========================================================================
+. 
+. file open mout using "results/weighted_prediction_results.md", write replace
+(file results/weighted_prediction_results.md not found)
+
+. 
+. file write mout "# 加权模型样本外预测结果" _n _n
+
+. file write mout "## 测试集：2025年10月 — 2026年2月（N=5）" _n _n
+
+. file write mout "> 加权方式：分析权重 = t（线性时间权重，越近的观测权重越大）
+> " _n
+
+. file write mout "> 对数模型使用Duan smearing调整：pred = exp(pred_log + σ²/2)
+> " _n _n
+
+. 
+. *--- Section: Minimum Price comparison ---
+. file write mout "### 最低成交价预测对比" _n _n
+
+. file write mout "| 模型 | 类型 | 权重 | MAE（元）| RMSE（元）| MAPE（%）|" _n
+
+. file write mout "|------|------|------|---------|---------|---------|" _n
+
+. file write mout "| MA4 | 水平值 | 等权（OLS） | 638 | 687 | 0.68 |" _n
+
+. file write mout "| WA4 | 水平值 | 时间加权（WLS） | " ///
+>     %8.0f (mae_WA4) " | " %8.0f (rmse_WA4) " | " %5.2f (mape_WA4) " |" _n
+
+. file write mout "| MB4 | 对数 | 等权（OLS） | 641 | 684 | 0.68 |" _n
+
+. file write mout "| WB4 | 对数 | 时间加权（WLS） | " ///
+>     %8.0f (mae_WB4) " | " %8.0f (rmse_WB4) " | " %5.2f (mape_WB4) " |" _n
+
+. file write mout _n
+
+. 
+. *--- Section: Average Price comparison ---
+. file write mout "### 平均成交价预测对比" _n _n
+
+. file write mout "| 模型 | 类型 | 权重 | MAE（元）| RMSE（元）| MAPE（%）|" _n
+
+. file write mout "|------|------|------|---------|---------|---------|" _n
+
+. file write mout "| MC4 | 水平值 | 等权（OLS） | 683 | 734 | 0.73 |" _n
+
+. file write mout "| WC4 | 水平值 | 时间加权（WLS） | " ///
+>     %8.0f (mae_WC4) " | " %8.0f (rmse_WC4) " | " %5.2f (mape_WC4) " |" _n
+
+. file write mout "| MD4 | 对数 | 等权（OLS） | 683 | 732 | 0.73 |" _n
+
+. file write mout "| WD4 | 对数 | 时间加权（WLS） | " ///
+>     %8.0f (mae_WD4) " | " %8.0f (rmse_WD4) " | " %5.2f (mape_WD4) " |" _n
+
+. file write mout _n
+
+. 
+. *--- Section: Per-period detail — min_price ---
+. file write mout "### 逐期预测明细" _n _n
+
+. file write mout "#### 最低成交价" _n _n
+
+. file write mout "| 期间 | 实际值 | WA4预测 | WA4误差 | WB4预测 | WB4误差 | MA
+> 4预测 | MA4误差 | MB4预测 | MB4误差 |" _n
+
+. file write mout "|------|--------|---------|---------|---------|---------|---
+> ------|---------|---------|---------|" _n
+
+. 
+. foreach tv of local test_ts {
+  2.     local yr_v   = scalar(yr_`tv')
+  3.     local mo_v   = scalar(mo_`tv')
+  4.     local a_min  = scalar(act_min_`tv')
+  5.     local pWA4   = scalar(pred_WA4_`tv')
+  6.     local pWB4   = scalar(pred_WB4_`tv')
+  7.     local pMA4   = scalar(pred_MA4_`tv')
+  8.     local pMB4   = scalar(pred_MB4_`tv')
+  9.     local eWA4   = `a_min' - `pWA4'
+ 10.     local eWB4   = `a_min' - `pWB4'
+ 11.     local eMA4   = `a_min' - `pMA4'
+ 12.     local eMB4   = `a_min' - `pMB4'
+ 13.     file write mout "| " %4.0f (`yr_v') "m" %02.0f (`mo_v') " | " ///
+>         %8.0f (`a_min') " | " %8.1f (`pWA4') " | " %8.1f (`eWA4') " | " ///
+>         %8.1f (`pWB4') " | " %8.1f (`eWB4') " | " ///
+>         %8.1f (`pMA4') " | " %8.1f (`eMA4') " | " ///
+>         %8.1f (`pMB4') " | " %8.1f (`eMB4') " |" _n
+ 14. }
+
+. 
+. file write mout _n
+
+. 
+. *--- Section: Per-period detail — avg_price ---
+. file write mout "#### 平均成交价" _n _n
+
+. file write mout "| 期间 | 实际值 | WC4预测 | WC4误差 | WD4预测 | WD4误差 | MC
+> 4预测 | MC4误差 | MD4预测 | MD4误差 |" _n
+
+. file write mout "|------|--------|---------|---------|---------|---------|---
+> ------|---------|---------|---------|" _n
+
+. 
+. foreach tv of local test_ts {
+  2.     local yr_v   = scalar(yr_`tv')
+  3.     local mo_v   = scalar(mo_`tv')
+  4.     local a_avg  = scalar(act_avg_`tv')
+  5.     local pWC4   = scalar(pred_WC4_`tv')
+  6.     local pWD4   = scalar(pred_WD4_`tv')
+  7.     local pMC4   = scalar(pred_MC4_`tv')
+  8.     local pMD4   = scalar(pred_MD4_`tv')
+  9.     local eWC4   = `a_avg' - `pWC4'
+ 10.     local eWD4   = `a_avg' - `pWD4'
+ 11.     local eMC4   = `a_avg' - `pMC4'
+ 12.     local eMD4   = `a_avg' - `pMD4'
+ 13.     file write mout "| " %4.0f (`yr_v') "m" %02.0f (`mo_v') " | " ///
+>         %8.0f (`a_avg') " | " %8.1f (`pWC4') " | " %8.1f (`eWC4') " | " ///
+>         %8.1f (`pWD4') " | " %8.1f (`eWD4') " | " ///
+>         %8.1f (`pMC4') " | " %8.1f (`eMC4') " | " ///
+>         %8.1f (`pMD4') " | " %8.1f (`eMD4') " |" _n
+ 14. }
+
+. 
+. file write mout _n
+
+. 
+. *--- Section: Key findings (dynamic) ---
+. file write mout "### 关键发现" _n _n
+
+. 
+. * Min price: compare WA4/MA4 and WB4/MB4 by RMSE
+. local rmse_WA4_v = scalar(rmse_WA4)
+
+. local rmse_WB4_v = scalar(rmse_WB4)
+
+. local rmse_WC4_v = scalar(rmse_WC4)
+
+. local rmse_WD4_v = scalar(rmse_WD4)
+
+. 
+. * OLS benchmarks (from 04_prediction.do results)
+. local rmse_MA4_hc = 687
+
+. local rmse_MB4_hc = 684
+
+. local rmse_MC4_hc = 734
+
+. local rmse_MD4_hc = 732
+
+. 
+. * WA4 vs MA4
+. if `rmse_WA4_v' < `rmse_MA4_hc' {
+.     file write mout "- **WA4 优于 MA4**（最低价水平值）：WLS RMSE=" %8.0f (`r
+> mse_WA4_v') " < OLS RMSE=687（时间加权改善预测）" _n
+. }
+
+. else {
+.     file write mout "- **WA4 未优于 MA4**（最低价水平值）：WLS RMSE=" %8.0f (
+> `rmse_WA4_v') " ≥ OLS RMSE=687（时间加权未改善预测）" _n
+. }
+
+. 
+. * WB4 vs MB4
+. if `rmse_WB4_v' < `rmse_MB4_hc' {
+.     file write mout "- **WB4 优于 MB4**（最低价对数）：WLS RMSE=" %8.0f (`rms
+> e_WB4_v') " < OLS RMSE=684（时间加权改善预测）" _n
+. }
+
+. else {
+.     file write mout "- **WB4 未优于 MB4**（最低价对数）：WLS RMSE=" %8.0f (`r
+> mse_WB4_v') " ≥ OLS RMSE=684（时间加权未改善预测）" _n
+. }
+
+. 
+. * WC4 vs MC4
+. if `rmse_WC4_v' < `rmse_MC4_hc' {
+.     file write mout "- **WC4 优于 MC4**（平均价水平值）：WLS RMSE=" %8.0f (`r
+> mse_WC4_v') " < OLS RMSE=734（时间加权改善预测）" _n
+. }
+
+. else {
+.     file write mout "- **WC4 未优于 MC4**（平均价水平值）：WLS RMSE=" %8.0f (
+> `rmse_WC4_v') " ≥ OLS RMSE=734（时间加权未改善预测）" _n
+. }
+
+. 
+. * WD4 vs MD4
+. if `rmse_WD4_v' < `rmse_MD4_hc' {
+.     file write mout "- **WD4 优于 MD4**（平均价对数）：WLS RMSE=" %8.0f (`rms
+> e_WD4_v') " < OLS RMSE=732（时间加权改善预测）" _n
+. }
+
+. else {
+.     file write mout "- **WD4 未优于 MD4**（平均价对数）：WLS RMSE=" %8.0f (`r
+> mse_WD4_v') " ≥ OLS RMSE=732（时间加权未改善预测）" _n
+. }
+
+. 
+. file write mout _n
+
+. file write mout "---" _n
+
+. file write mout "_Generated by 07_weighted_prediction.do_" _n
+
+. 
+. file close mout
+
+. 
+. di "=== Markdown written to results/weighted_prediction_results.md ==="
+=== Markdown written to results/weighted_prediction_results.md ===
+
+. di "=== 07_weighted_prediction.do completed ==="
+=== 07_weighted_prediction.do completed ===
+
+. 
+. log close sublog07
+      name:  sublog07
+       log:  /home/aragorn/Working/chepai_data/log/07_weighted_prediction.log
+  log type:  text
+ closed on:  26 Mar 2026, 16:34:19
+-------------------------------------------------------------------------------
+
+. 
+end of do-file
